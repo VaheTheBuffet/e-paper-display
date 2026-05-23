@@ -99,37 +99,39 @@ def parse_epub(epub_path: str) -> list:
     return paragraphs
 
 
-# ── Rendering helpers ─────────────────────────────────────────────────────────
-def wrap_paragraph(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
-    """Wrap a single paragraph string into lines that fit max_width pixels."""
-    words = text.split()
-    lines = []
-    current = ''
-    for word in words:
-        candidate = (current + ' ' + word).strip() if current else word
-        w = font.getlength(candidate)
-        if w <= max_width:
-            current = candidate
-        else:
-            if current:
-                lines.append(current)
-            # If a single word is wider than max_width, force-split it
-            if font.getlength(word) > max_width:
-                while word:
-                    for i in range(len(word), 0, -1):
-                        if font.getlength(word[:i]) <= max_width:
-                            lines.append(word[:i])
-                            word = word[i:]
-                            break
-                    else:
-                        lines.append(word)
-                        word = ''
-                current = ''
-            else:
-                current = word
-    if current:
-        lines.append(current)
-    return lines if lines else ['']
+class FPException(Exception)
+class FP:
+    """Specialized File Pointer like C, could be more pythonic maybe"""
+    def __init__(self, buf):
+        self.p = 0 #block
+        self.w = 0 #word
+        self.buf = buf #raw buffer
+
+    def next_word(self) -> (str, str):
+        block_len = len(self.buf[self.p][1])
+        buf_len = len(self.buf)
+
+        if self.w == block_len:
+            if self.p == buf_len:
+                raise FPException("After end of buffer")
+
+            self.w = 0
+            self.p += 1
+            self.type = self.buf[self.p][0]
+
+        self.w += 1
+        return (self.buf[self.p][0], self.buf[self.p][1][self.w - 1])
+
+    def previous_word(self) -> (str, str):
+        if self.w == 0:
+            if self.p == 0:
+                raise FPException("Before beginning of buffer")
+
+            self.p -= 1
+            self.w = len(self.buf[self.p][1]) - 1
+
+        self.w -= 1
+        return (self.buf[self.p][0], self.buf[self.p][1][self.w + 1])
 
 
 class PageRenderer:
@@ -149,24 +151,75 @@ class PageRenderer:
         ascent, descent = font.getmetrics()
         return ascent + descent + LINE_SPACING
 
-    def add_paragraph(self, kind: str, text: str):
-        """Wrap paragraph into lines and add them, flushing pages as needed."""
-        font = self.font_heading if kind == 'heading' else self.font_body
-        # Add a blank line before headings for visual separation
-        if kind == 'heading' and self._lines:
-            self._try_add_line('', self.font_body)
-        wrapped = wrap_paragraph(text, font, DISPLAY_W - LEFT_MARGIN * 2)
-        for line in wrapped:
-            self._try_add_line(line, font)
-        # Blank line after each paragraph
-        self._try_add_line('', self.font_body)
+    def advance_page(self, fp: FP):
+        current_line = ''
 
-    def _try_add_line(self, text: str, font: ImageFont.FreeTypeFont):
+        while True:
+            (ty, word) = FP.get_word()
+            candidate_line = (current_line + ' ' + word).strip() if current_line else word
+            w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
+            if w <= max_width:
+                current_line = candidate_line
+            else:
+                if current_line:
+                    self._lines.append(current_line)
+
+                if font.getlength(word) > max_width:
+                    while word:
+                        for i in range(len(word), 0, -1):
+                            if font.getlength(word[:i]) <= max_width:
+                                lines.append(word[:i])
+                                word = word[i:]
+                                break
+                        else:
+                            self._lines.append(word)
+                            word = ''
+                    current_line = ''
+                else:
+                    current_line = word
+
+        if current_line:
+            self._lines.append(current_line)
+
+    def retreat_page(self, fp: FP):
+        current_line = ''
+
+        while True:
+            (ty, word) = FP.get_word()
+            candidate_line = (word + ' ' + current_line).strip() if current_line else word
+            w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
+            if w <= max_width:
+                current_line = candidate_line
+            else:
+                if current_line:
+                    self._lines.append(current_line)
+
+                if font.getlength(word) > max_width:
+                    while word:
+                        for i in range(len(word), 0, -1):
+                            if font.getlength(word[:i]) <= max_width:
+                                lines.append(word[:i])
+                                word = word[i:]
+                                break
+                        else:
+                            self._lines.append(word)
+                            word = ''
+                    current_line = ''
+                else:
+                    current_line = word
+
+        if current_line:
+            self._lines.append(current_line)
+        
+    def _try_add_line(self, text: str, font: ImageFont.FreeTypeFont) -> bool:
         lh = self._line_height(font)
         if self._y_used + lh > DISPLAY_H:
             self._flush_page()
+            return True
+
         self._lines.append((text, font))
         self._y_used += lh
+        return False
 
     def _flush_page(self):
         if not self._lines:
@@ -179,8 +232,8 @@ class PageRenderer:
             draw.text((LEFT_MARGIN, y), text, font=font, fill=0)
             y += self._line_height(font)
         self.epd.display(self.epd.getbuffer(image))
-        time.sleep(PAGE_DELAY)
         self.epd.Clear(0xFF)
+
         self._lines  = []
         self._y_used = 0
 
@@ -214,12 +267,19 @@ def main():
         font_heading = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), FONT_HEADING_SIZE)
 
         renderer = PageRenderer(epd, font_body, font_heading)
+        file_pointer = FP(paragraphs)
 
         for kind, text in paragraphs:
             renderer.add_paragraph(kind, text)
 
-        renderer.finish()
+        while True:
+            try:
+                renderer.advance_page(file_pointer)
+                time.sleep(PAGE_DELAY)
+            except FPException:
+                break
 
+        renderer.finish()
         log.info("Done — sleeping display")
         epd.sleep()
 
