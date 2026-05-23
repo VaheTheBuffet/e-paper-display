@@ -149,6 +149,8 @@ class PageRenderer:
         self._lines: list[tuple[str, ImageFont.FreeTypeFont]] = []
         self._y_used = 0
 
+        self.max_width = DISPLAY_W - LEFT_MARGIN * 2
+
     def _line_height(self, font: ImageFont.FreeTypeFont) -> int:
         ascent, descent = font.getmetrics()
         return ascent + descent + LINE_SPACING
@@ -160,16 +162,16 @@ class PageRenderer:
             (ty, word) = FP.get_word()
             candidate_line = (current_line + ' ' + word).strip() if current_line else word
             w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
-            if w <= max_width:
+            if w <= self.max_width:
                 current_line = candidate_line
             else:
                 if current_line:
                     self._lines.append(current_line)
 
-                if font.getlength(word) > max_width:
+                if font.getlength(word) > self.max_width:
                     while word:
                         for i in range(len(word), 0, -1):
-                            if font.getlength(word[:i]) <= max_width:
+                            if font.getlength(word[:i]) <= self.max_width:
                                 lines.append(word[:i])
                                 word = word[i:]
                                 break
@@ -190,16 +192,16 @@ class PageRenderer:
             (ty, word) = FP.get_word()
             candidate_line = (word + ' ' + current_line).strip() if current_line else word
             w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
-            if w <= max_width:
+            if w <= self.max_width:
                 current_line = candidate_line
             else:
                 if current_line:
                     self._lines.append(current_line)
 
-                if font.getlength(word) > max_width:
+                if font.getlength(word) > self.max_width:
                     while word:
                         for i in range(len(word), 0, -1):
-                            if font.getlength(word[:i]) <= max_width:
+                            if font.getlength(word[:i]) <= self.max_width:
                                 lines.append(word[:i])
                                 word = word[i:]
                                 break
