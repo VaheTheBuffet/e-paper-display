@@ -159,9 +159,10 @@ class PageRenderer:
         current_line = ''
 
         while True:
-            (ty, word) = FP.get_word()
+            (ty, word) = fp.next_word()
             candidate_line = (current_line + ' ' + word).strip() if current_line else word
-            w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
+            font = self.fond_body if ty == 'paragraph' else self.font_heading
+            w = font.getlength(candidate_line)
             if w <= self.max_width:
                 current_line = candidate_line
             else:
@@ -189,7 +190,7 @@ class PageRenderer:
         current_line = ''
 
         while True:
-            (ty, word) = FP.get_word()
+            (ty, word) = fp.previous_word()
             candidate_line = (word + ' ' + current_line).strip() if current_line else word
             w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
             if w <= self.max_width:
@@ -273,9 +274,6 @@ def main():
         renderer = PageRenderer(epd, font_body, font_heading)
         file_pointer = FP(paragraphs)
 
-        for kind, text in paragraphs:
-            renderer.add_paragraph(kind, text)
-
         while True:
             try:
                 renderer.advance_page(file_pointer)
@@ -287,8 +285,9 @@ def main():
         log.info("Done — sleeping display")
         epd.sleep()
 
-    except IOError as e:what 
+    except IOError as e:
         log.error(e)
+
     except KeyboardInterrupt:
         log.info("Interrupted by user")
         epd2in13_V4.epdconfig.module_exit(cleanup=True)
