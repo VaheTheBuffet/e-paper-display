@@ -99,7 +99,9 @@ def parse_epub(epub_path: str) -> list:
     return paragraphs
 
 
-class FPException(Exception)
+class FPException(Exception):
+    pass
+
 class FP:
     """Specialized File Pointer like C, could be more pythonic maybe"""
     def __init__(self, buf):
@@ -283,7 +285,7 @@ def main():
         log.info("Done — sleeping display")
         epd.sleep()
 
-    except IOError as e:
+    except IOError as e:what 
         log.error(e)
     except KeyboardInterrupt:
         log.info("Interrupted by user")
