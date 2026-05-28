@@ -1,10 +1,9 @@
 #!/usr/bin/python
-# -*- coding:utf-8 -*-
 """
-E-ink EPUB reader for Waveshare epd2in13_V4
-- Parses EPUB files and renders text page-by-page on the e-paper display
-- Automatically wraps long lines and clears the screen when a page is full
-Usage: python ebook_reader.py <path_to_epub>
+e-ink epub reader for waveshare epd2in13_v4
+- parses epub files and renders text page-by-page on the e-paper display
+- automatically wraps long lines and clears the screen when a page is full
+usage: python ebook_reader.py <path_to_epub>
 """
 
 import sys
@@ -106,34 +105,8 @@ class FP:
     """Specialized File Pointer like C, could be more pythonic maybe"""
     def __init__(self, buf):
         self.p = 0 #block
-        self.w = 0 #word
+        self.c = 0 #character
         self.buf = buf #raw buffer
-
-    def next_word(self) -> (str, str):
-        block_len = len(self.buf[self.p][1])
-        buf_len = len(self.buf)
-
-        if self.w == block_len:
-            if self.p == buf_len:
-                raise FPException("After end of buffer")
-
-            self.w = 0
-            self.p += 1
-            self.type = self.buf[self.p][0]
-
-        self.w += 1
-        return (self.buf[self.p][0], self.buf[self.p][1][self.w - 1])
-
-    def previous_word(self) -> (str, str):
-        if self.w == 0:
-            if self.p == 0:
-                raise FPException("Before beginning of buffer")
-
-            self.p -= 1
-            self.w = len(self.buf[self.p][1]) - 1
-
-        self.w -= 1
-        return (self.buf[self.p][0], self.buf[self.p][1][self.w + 1])
 
 
 class PageRenderer:
@@ -151,42 +124,51 @@ class PageRenderer:
 
         self.max_width = DISPLAY_W - LEFT_MARGIN * 2
 
-    def _line_height(self, font: ImageFont.FreeTypeFont) -> int:
+    def _line_height(self, font: ImageFont.FreeTypeFont) -> int: 
         ascent, descent = font.getmetrics()
         return ascent + descent + LINE_SPACING
 
     def advance_page(self, fp: FP):
+        """Advances the render buffer by one visual page"""
+
         current_line = ''
+        page_completed = False
+
+        ty = fp.buf[fp.p][0]
+        font = self.font_body if ty == 'body' else self.font_heading
+        ascent, descent = font.getmetrics()
+        font_height = ascent + descent + LINE_SPACING
 
         while True:
-            (ty, word) = fp.next_word()
-            candidate_line = (current_line + ' ' + word).strip() if current_line else word
-            font = self.fond_body if ty == 'paragraph' else self.font_heading
-            w = font.getlength(candidate_line)
-            if w <= self.max_width:
-                current_line = candidate_line
-            else:
-                if current_line:
-                    self._lines.append(current_line)
-
-                if font.getlength(word) > self.max_width:
-                    while word:
-                        for i in range(len(word), 0, -1):
-                            if font.getlength(word[:i]) <= self.max_width:
-                                lines.append(word[:i])
-                                word = word[i:]
-                                break
-                        else:
-                            self._lines.append(word)
-                            word = ''
-                    current_line = ''
+            #Attempt to obtain a new line
+            #We will assume the entire line has the same font height
+            if self._y_used + font_height < DISPLAY_H:
+                #Attempt to fill line
+                for i in range(fp.c, len(fp.buf[fp.p][1])):
+                    line_width = font.getlength(fp.buf[fp.p][1][fp.c: i+1])
+                    if line_width > self.max_width:
+                        self._lines.append((fp.buf[fp.p][1][fp.c: i], font))
+                        self._y_used += font_height
+                        fp.c = i
+                        break
                 else:
-                    current_line = word
+                    self._lines.append((fp.buf[fp.p][1][fp.c: len(fp.buf[fp.p][1])], font))
+                    self._lines.append(('', font))
+                    fp.c = 0
+                    fp.p += 1
+                    ty = fp.buf[fp.p][0]
+                    font = self.font_body if ty == 'body' else self.font_heading
+                    ascent, descent = font.getmetrics()
+                    font_height = ascent + descent + LINE_SPACING
+                    self._y_used += 2 * font_height
 
-        if current_line:
-            self._lines.append(current_line)
+            else:
+                break
+
+        self._flush_page()
 
     def retreat_page(self, fp: FP):
+        """Retreates the render buffer by one visual page"""
         current_line = ''
 
         while True:
@@ -237,10 +219,12 @@ class PageRenderer:
             draw.text((LEFT_MARGIN, y), text, font=font, fill=0)
             y += self._line_height(font)
         self.epd.display(self.epd.getbuffer(image))
-        self.epd.Clear(0xFF)
 
         self._lines  = []
         self._y_used = 0
+
+    def clear_screen(self):
+        self.epd.Clear(0xFF)
 
     def finish(self):
         """Flush any remaining lines as the last page."""
@@ -278,7 +262,9 @@ def main():
             try:
                 renderer.advance_page(file_pointer)
                 time.sleep(PAGE_DELAY)
+                renderer.clear_screen()
             except FPException:
+                log.error("finished or error")
                 break
 
         renderer.finish()
