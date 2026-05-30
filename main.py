@@ -14,6 +14,7 @@ import time
 import textwrap
 from html.parser import HTMLParser
 from PIL import Image, ImageDraw, ImageFont
+from gpiozero import Button
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 picdir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pic')
@@ -165,7 +166,7 @@ class PageRenderer:
             else:
                 break
 
-        self._flush_page()
+        #self._flush_page()
 
     def retreat_page(self, fp: FP):
         """Retreates the render buffer by one visual page"""
@@ -231,7 +232,35 @@ class PageRenderer:
         self._flush_page()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+#------------------------IDK-----------------------------
+# There are a few ways to do this, but this seems to be a more
+# clear approach. You can actually just bind methods as callable objects
+# and self param will be bound by default because methods and functions are
+# different types, but that's not at all obvious, so I went with the closures.
+class ButtonHandler:
+    def __init__(self):
+        self.button_time = 0
+        self.press_type = 0
+
+        def handle_press():
+            self.button_time = time.time()
+
+        
+        def handle_release():
+            time_now = time.time()
+            elapsed_time = time_now - self.button_time
+
+            if elapsed_time > 0.8: #retreat page
+                self.press_type = 'retreat'
+            else: #
+                self.press_type = 'advance'
+
+        self.handle_press = handle_press
+        self.handle_release = handle_release
+#------------------------IDK-----------------------------
+
+
+#-----------------------Main-----------------------------
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <path_to_epub>")
@@ -245,6 +274,13 @@ def main():
     log.info(f"Parsing EPUB: {epub_path}")
     paragraphs = parse_epub(epub_path)
     log.info(f"Found {len(paragraphs)} paragraphs")
+
+
+    #init button on gpio pin 4 and set callbacks
+    button = Button(4)
+    button_handler = ButtonHandler()
+    button.when_pressed = button_handler.handle_press
+    button.when_released = button_handler.handle_release
 
     try:
         epd = epd2in13_V4.EPD()
@@ -260,12 +296,24 @@ def main():
 
         while True:
             try:
-                renderer.advance_page(file_pointer)
-                time.sleep(PAGE_DELAY)
-                renderer.clear_screen()
+                if button_handler.press_type == 'advance':
+                    #renderer.clear_screen()
+                    #time.sleep(PAGE_DELAY)
+                    for i in range(1000):
+                        renderer._lines = []
+                        renderer._y_used = 0
+                        print(f'page {i}')
+                        renderer.advance_page(file_pointer)
+                    renderer._flush_page()
+                elif button_handler.press_type == 'retreat':
+                    log.error("retreating page")
+                    pass
+
             except FPException:
                 log.error("finished or error")
                 break
+
+            button_handler.press_type = None
 
         renderer.finish()
         log.info("Done — sleeping display")
