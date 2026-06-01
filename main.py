@@ -177,20 +177,27 @@ class PageRenderer:
             font = self.font_body if ty == 'body' else self.font_heading
             lh = self._line_height(font)
             c = 0
-            for i in range(len(text)):
-                if font.getlength(text[c: i+1]) > self.max_width:
 
+            while c < len(text):
+
+                i0, i1 = c, len(text) - 1
+                while i1 > i0:
+                    i_m = (i0 + i1) // 2
+                    if font.getlength(text[c: i_m + 1]) > self.max_width:
+                        i1 = m
+                    else:
+                        i0 = m + 1
+                else:
                     if self._y_used + lh > DISPLAY_H:
                         self._y_used = 0
                         pages.append([])
 
-                    pages[-1].append((p, i+1))
+                    c = i + 1
+                    pages[-1].append((p, c))
                     self._y_used += lh 
-                    c = i
             else:
                 if self._y_used + lh <= DISPLAY_H:
-                    pages[-1].append(pages[-1][-1])
-
+                    pages[-1].append((p, c))
 
 
     def retreat_page(self, fp: FP):
@@ -258,8 +265,8 @@ class PageRenderer:
 
 
 #------------------------IDK-----------------------------
-# There are a few ways to do this, but this seems to be a more
-# clear approach. You can actually just bind methods as callable objects
+# There are a few ways to do this, but this seems to be one of the more
+# clear approaches. You can actually just bind methods as callable objects
 # and self param will be bound by default because methods and functions are
 # different types, but that's not at all obvious, so I went with the closures.
 class ButtonHandler:
