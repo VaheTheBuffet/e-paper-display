@@ -168,6 +168,31 @@ class PageRenderer:
 
         #self._flush_page()
 
+    def visual_parse_text(self, fp: FP):
+        """parse text into page, return array of file pointers to visual lines"""
+        pages: list[list[tuple(int, int)]] = [[(0, 0)]]
+
+        fp = FP(fp.buf)
+        for p, ty, text in enumerate(fp.buf):
+            font = self.font_body if ty == 'body' else self.font_heading
+            lh = self._line_height(font)
+            c = 0
+            for i in range(len(paragraph)):
+                if font.getlength(paragraph[cur_word: i+1]) > self.max_width:
+
+                    if self._y_used + lh > DISPLAY_H:
+                        self._y_used = 0
+                        self.pages.append([])
+
+                    pages[-1].append((p, i+1))
+                    self_y_used += lh 
+                    c = i
+            else:
+                if self._y_used + lh <= DISPLAY_H:
+                    pages[-1].append(pages[-1][-1])
+
+
+
     def retreat_page(self, fp: FP):
         """Retreates the render buffer by one visual page"""
         current_line = ''
