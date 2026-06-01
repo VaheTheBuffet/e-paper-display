@@ -173,19 +173,19 @@ class PageRenderer:
         pages: list[list[tuple(int, int)]] = [[(0, 0)]]
 
         fp = FP(fp.buf)
-        for p, ty, text in enumerate(fp.buf):
+        for p, (ty, text) in enumerate(fp.buf):
             font = self.font_body if ty == 'body' else self.font_heading
             lh = self._line_height(font)
             c = 0
-            for i in range(len(paragraph)):
-                if font.getlength(paragraph[cur_word: i+1]) > self.max_width:
+            for i in range(len(text)):
+                if font.getlength(text[c: i+1]) > self.max_width:
 
                     if self._y_used + lh > DISPLAY_H:
                         self._y_used = 0
-                        self.pages.append([])
+                        pages.append([])
 
                     pages[-1].append((p, i+1))
-                    self_y_used += lh 
+                    self._y_used += lh 
                     c = i
             else:
                 if self._y_used + lh <= DISPLAY_H:
@@ -317,7 +317,11 @@ def main():
         font_heading = ImageFont.truetype(os.path.join(picdir, 'Font.ttc'), FONT_HEADING_SIZE)
 
         renderer = PageRenderer(epd, font_body, font_heading)
+
         file_pointer = FP(paragraphs)
+        log.info("started parsing")
+        renderer.visual_parse_text(file_pointer)
+        log.info("finished parsing")
 
         while True:
             try:
