@@ -99,9 +99,6 @@ def parse_epub(epub_path: str) -> list:
     return paragraphs
 
 
-class FPException(Exception):
-    pass
-
 class FP:
     """Specialized File Pointer like C, could be more pythonic maybe"""
     def __init__(self, buf):
@@ -120,8 +117,17 @@ class PageRenderer:
         self.epd          = epd
         self.font_body    = font_body
         self.font_heading = font_heading
+
+        letters_codes = range(ord('A'), ord('z') + 1)
+        self.table_body = [font_body.getlength(chr(c)) for c in letters_codes]
+        self.table_heading = [font_heading.getlength(chr(c)) for c in letters_codes]
+
+        self.table_len = len(self.table_body)
+
         self._lines: list[tuple[str, ImageFont.FreeTypeFont]] = []
         self._y_used = 0
+
+        self.pages = self.pages = None
 
         self.max_width = DISPLAY_W - LEFT_MARGIN * 2
 
@@ -129,108 +135,57 @@ class PageRenderer:
         ascent, descent = font.getmetrics()
         return ascent + descent + LINE_SPACING
 
-    def advance_page(self, fp: FP):
-        """Advances the render buffer by one visual page"""
+    def display_page(self, fp: FP, n: int):
+        lines = self.pages[n]
+        print(lines)
 
-        current_line = ''
-        page_completed = False
+        for ((p, c0), (_, c1)) in lines:
+            ty, text = fp.buf[p]
+            font = self.font_body if ty == 'body' else self.font_heading
 
-        ty = fp.buf[fp.p][0]
-        font = self.font_body if ty == 'body' else self.font_heading
-        ascent, descent = font.getmetrics()
-        font_height = ascent + descent + LINE_SPACING
+            self._try_add_line(text[c0: c1], font)
 
-        while True:
-            #Attempt to obtain a new line
-            #We will assume the entire line has the same font height
-            if self._y_used + font_height < DISPLAY_H:
-                #Attempt to fill line
-                for i in range(fp.c, len(fp.buf[fp.p][1])):
-                    line_width = font.getlength(fp.buf[fp.p][1][fp.c: i+1])
-                    if line_width > self.max_width:
-                        self._lines.append((fp.buf[fp.p][1][fp.c: i], font))
-                        self._y_used += font_height
-                        fp.c = i
-                        break
-                else:
-                    self._lines.append((fp.buf[fp.p][1][fp.c: len(fp.buf[fp.p][1])], font))
-                    self._lines.append(('', font))
-                    fp.c = 0
-                    fp.p += 1
-                    ty = fp.buf[fp.p][0]
-                    font = self.font_body if ty == 'body' else self.font_heading
-                    ascent, descent = font.getmetrics()
-                    font_height = ascent + descent + LINE_SPACING
-                    self._y_used += 2 * font_height
-
-            else:
-                break
-
-        #self._flush_page()
 
     def visual_parse_text(self, fp: FP):
         """parse text into page, return array of file pointers to visual lines"""
-        pages: list[list[tuple(int, int)]] = [[(0, 0)]]
+        self.pages: list[list[tuple(int, int)]] = [[]]
 
         fp = FP(fp.buf)
         for p, (ty, text) in enumerate(fp.buf):
             font = self.font_body if ty == 'body' else self.font_heading
+            table = self.table_body if ty == 'body' else self.table_heading
+            
             lh = self._line_height(font)
             c = 0
-
-            while c < len(text):
-
-                i0, i1 = c, len(text) - 1
-                while i1 > i0:
-                    i_m = (i0 + i1) // 2
-                    if font.getlength(text[c: i_m + 1]) > self.max_width:
-                        i1 = m
+            l = len(text)
+            while True:
+                running_length = 0
+                i = c
+                while i < l and running_length <= self.max_width:
+                    idx = ord(text[i]) - ord('A')
+                    if(idx >= 0 and idx < self.table_len):
+                        running_length += table[idx]
                     else:
-                        i0 = m + 1
+                        running_length += table[0]
+                    i += 1
+
                 else:
                     if self._y_used + lh > DISPLAY_H:
+                        self.pages.append([])
                         self._y_used = 0
-                        pages.append([])
 
-                    c = i + 1
-                    pages[-1].append((p, c))
-                    self._y_used += lh 
-            else:
-                if self._y_used + lh <= DISPLAY_H:
-                    pages[-1].append((p, c))
+                    self.pages[-1].append(((p, c), (p, i)))
+                    self._y_used += lh
 
+                    if i + 1 >= len(text):
+                        if self._y_used + lh <= DISPLAY_H:
+                            self.pages[-1].append(((p, i), (p, i)))
+                            self._y_used += lh
 
-    def retreat_page(self, fp: FP):
-        """Retreates the render buffer by one visual page"""
-        current_line = ''
+                        break
 
-        while True:
-            (ty, word) = fp.previous_word()
-            candidate_line = (word + ' ' + current_line).strip() if current_line else word
-            w = (self.font_body if ty == 'paragraph' else self.fond_heading).getlength(candidate_line)
-            if w <= self.max_width:
-                current_line = candidate_line
-            else:
-                if current_line:
-                    self._lines.append(current_line)
+                    c = i
 
-                if font.getlength(word) > self.max_width:
-                    while word:
-                        for i in range(len(word), 0, -1):
-                            if font.getlength(word[:i]) <= self.max_width:
-                                lines.append(word[:i])
-                                word = word[i:]
-                                break
-                        else:
-                            self._lines.append(word)
-                            word = ''
-                    current_line = ''
-                else:
-                    current_line = word
-
-        if current_line:
-            self._lines.append(current_line)
-        
     def _try_add_line(self, text: str, font: ImageFont.FreeTypeFont) -> bool:
         lh = self._line_height(font)
         if self._y_used + lh > DISPLAY_H:
@@ -330,24 +285,18 @@ def main():
         renderer.visual_parse_text(file_pointer)
         log.info("finished parsing")
 
+        page = 0
         while True:
-            try:
-                if button_handler.press_type == 'advance':
-                    #renderer.clear_screen()
-                    #time.sleep(PAGE_DELAY)
-                    for i in range(1000):
-                        renderer._lines = []
-                        renderer._y_used = 0
-                        print(f'page {i}')
-                        renderer.advance_page(file_pointer)
-                    renderer._flush_page()
-                elif button_handler.press_type == 'retreat':
-                    log.error("retreating page")
-                    pass
-
-            except FPException:
-                log.error("finished or error")
-                break
+            if button_handler.press_type == 'advance':
+                #renderer.clear_screen()
+                #time.sleep(PAGE_DELAY)
+                page += 1
+                renderer.display_page(file_pointer, page)
+            elif button_handler.press_type == 'retreat':
+                log.error("retreating page")
+                page -= 1
+                renderer.display_page(file_pointer, page)
+                pass
 
             button_handler.press_type = None
 
