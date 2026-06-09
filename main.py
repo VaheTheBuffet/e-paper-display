@@ -158,6 +158,8 @@ class PageRenderer:
         self.pages: list[list[tuple(int, int)]] = [[]]
         start = time.time()
 
+        word_width_cache: dict[str, int] = {}
+
         for p, (ty, text) in enumerate(fp.buf):
             font = self.font_body if ty == 'body' else self.font_heading
             table = self.table_body if ty == 'body' else self.table_heading
@@ -168,7 +170,11 @@ class PageRenderer:
             c = 0
 
             for word in text.split():
-                word_width = sum([table[i] if 0 <= i < self.table_len else table[0] for i in [ord(c) - ord('A') for c in word]])
+                if word in word_width_cache:
+                    word_width = word_width_cache[word]
+                else:
+                    word_width = sum(table[i] if 0 <= (i := ord(c) - ord('A')) < self.table_len else table[0] for c in word)
+                    word_width_cache[word] = word_width
 
                 if running_width + word_width > self.max_width:
                     running_width = 0
@@ -204,7 +210,7 @@ class PageRenderer:
 
                         continue
                     
-                running_width += word_width
+                running_width += word_width + table[ord(' ')]
                 running_length += len(word) + 1
 
             if self._y_used + lh > DISPLAY_H:
