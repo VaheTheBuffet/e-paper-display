@@ -131,24 +131,91 @@ class PageRenderer:
 
         self.max_width = DISPLAY_W - LEFT_MARGIN * 2
 
+
     def _line_height(self, font: ImageFont.FreeTypeFont) -> int: 
         ascent, descent = font.getmetrics()
         return ascent + descent + LINE_SPACING
 
+
     def display_page(self, fp: FP, n: int):
         lines = self.pages[n]
-        print(lines)
 
         for ((p, c0), (_, c1)) in lines:
             ty, text = fp.buf[p]
             font = self.font_body if ty == 'body' else self.font_heading
 
-            self._try_add_line(text[c0: c1], font)
+            self._lines.append((text[c0: c1], font))
+        
+        self._flush_page()
+
+
+    def visual_parse_text2(self, fp: FP):
+        """parse text into page, return array of file pointers to visual lines"""
+        self.pages: list[list[tuple(int, int)]] = [[]]
+        start = time.time()
+
+        for p, (ty, text) in enumerate(fp.buf):
+            font = self.font_body if ty == 'body' else self.font_heading
+            table = self.table_body if ty == 'body' else self.table_heading
+            
+            lh = self._line_height(font)
+            running_length = 0
+            running_width = 0
+            c = 0
+
+            for word in text.split():
+                word_width = sum([table[i] if 0 <= i < self.table_len else table[0] for i in [ord(c) - ord('A') for c in word]])
+
+                if running_width + word_width > self.max_width:
+                    running_width = 0
+
+                    if self._y_used + lh > DISPLAY_H:
+                        self.pages.append([])
+                        self._y_used = 0
+
+                    self._y_used += lh
+                    self.pages[-1].append(((p, c), (p, c + running_length)))
+                    c += running_length
+                    running_length = 0
+
+                    if word_width > self.max_width:
+                        #truncate word if it doesn't fit on line
+
+                        truncated_word_width = 0
+
+                        for j, letter in enumerate(word):
+                            char_width = table[ord(letter)] if 0 <= ord(letter) - ord('A') < self.table_len - ord('A') else table[0]
+
+                            if truncated_word_width + char_width > self.max_width:
+                                self.pages[-1].append(((p, c), (p, c + j)))
+                                #self.pages[-1].append(((p, c + j), (p, c + len(word))))
+                                c += len(word)
+                                running_length = len(word) - j
+                                running_width = word_width - truncated_word_width
+                                self._y_used += lh
+
+                                break
+
+                            truncated_word_width += char_width
+
+                        continue
+                    
+                running_width += word_width
+                running_length += len(word) + 1
+
+            if self._y_used + lh > DISPLAY_H:
+                self.pages.append([])
+                self._y_used = 0
+
+            self.pages[-1].append(((p, c), (p, len(text))))
+            self.pages[-1].append(((p, running_length), (p, running_length)))
+            self._y_used += 2 * lh
 
 
     def visual_parse_text(self, fp: FP):
         """parse text into page, return array of file pointers to visual lines"""
         self.pages: list[list[tuple(int, int)]] = [[]]
+        start = time.time()
 
         fp = FP(fp.buf)
         for p, (ty, text) in enumerate(fp.buf):
@@ -158,43 +225,37 @@ class PageRenderer:
             lh = self._line_height(font)
             c = 0
             l = len(text)
-            while True:
-                running_length = 0
-                i = c
-                while i < l and running_length <= self.max_width:
-                    idx = ord(text[i]) - ord('A')
-                    if(idx >= 0 and idx < self.table_len):
-                        running_length += table[idx]
-                    else:
-                        running_length += table[0]
-                    i += 1
-
+            running_length = 0
+            for i in range(l):
+                idx = ord(text[i]) - ord('A')
+                if idx >= 0 and idx < self.table_len:
+                    running_length += table[idx]
                 else:
+                    running_length += table[0]
+
+                if running_length > self.max_width:
+                    running_length = 0
+
                     if self._y_used + lh > DISPLAY_H:
                         self.pages.append([])
                         self._y_used = 0
 
+                    self._y_used += lh
                     self.pages[-1].append(((p, c), (p, i)))
+                    c = i
+            
+            if c + 1 != l:
+                if self._y_used + lh > DISPLAY_H:
+                    self.pages.append([])
+                    self._y_used = 0
+
+                self.pages[-1].append(((p, c), (p, l)))
+                self._y_used += lh
+
+                if self._y_used + lh <= DISPLAY_H:
+                    self.pages[-1].append(((p, l-1), (p, l-1)))
                     self._y_used += lh
 
-                    if i + 1 >= len(text):
-                        if self._y_used + lh <= DISPLAY_H:
-                            self.pages[-1].append(((p, i), (p, i)))
-                            self._y_used += lh
-
-                        break
-
-                    c = i
-
-    def _try_add_line(self, text: str, font: ImageFont.FreeTypeFont) -> bool:
-        lh = self._line_height(font)
-        if self._y_used + lh > DISPLAY_H:
-            self._flush_page()
-            return True
-
-        self._lines.append((text, font))
-        self._y_used += lh
-        return False
 
     def _flush_page(self):
         if not self._lines:
@@ -232,7 +293,6 @@ class ButtonHandler:
         def handle_press():
             self.button_time = time.time()
 
-        
         def handle_release():
             time_now = time.time()
             elapsed_time = time_now - self.button_time
@@ -282,10 +342,10 @@ def main():
 
         file_pointer = FP(paragraphs)
         log.info("started parsing")
-        renderer.visual_parse_text(file_pointer)
+        renderer.visual_parse_text2(file_pointer)
         log.info("finished parsing")
 
-        page = 0
+        page = -1 
         while True:
             if button_handler.press_type == 'advance':
                 #renderer.clear_screen()
