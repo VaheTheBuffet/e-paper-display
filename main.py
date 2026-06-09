@@ -12,6 +12,7 @@ import zipfile
 import logging
 import time
 import textwrap
+import array
 from html.parser import HTMLParser
 from PIL import Image, ImageDraw, ImageFont
 from gpiozero import Button
@@ -119,13 +120,16 @@ class PageRenderer:
         self.font_heading = font_heading
 
         letters_codes = range(ord('A'), ord('z') + 1)
-        self.table_body = [font_body.getlength(chr(c)) for c in letters_codes]
-        self.table_heading = [font_heading.getlength(chr(c)) for c in letters_codes]
+        self.table_body = array.array('f', [font_body.getlength(chr(c)) for c in letters_codes])
+        self.table_heading = array.array('f', [font_heading.getlength(chr(c)) for c in letters_codes])
 
         self.table_len = len(self.table_body)
 
         self._lines: list[tuple[str, ImageFont.FreeTypeFont]] = []
         self._y_used = 0
+
+        self._height_heading = self._line_height(font_heading)
+        self._height_body = self._line_height(font_body)
 
         self.pages = self.pages = None
 
@@ -157,8 +161,8 @@ class PageRenderer:
         for p, (ty, text) in enumerate(fp.buf):
             font = self.font_body if ty == 'body' else self.font_heading
             table = self.table_body if ty == 'body' else self.table_heading
-            
-            lh = self._line_height(font)
+            lh = self._height_body if ty == 'body' else self._height_heading
+
             running_length = 0
             running_width = 0
             c = 0
